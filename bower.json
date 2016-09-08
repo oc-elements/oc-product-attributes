@@ -8,7 +8,7 @@
     "iron-data-table": "1.0.0",
     "oc-iron-data-table-styles": "git://github.com/oc-elements/oc-iron-data-table-styles.git#1.x",
     "oc-grid-controls": "git://github.com/oc-elements/oc-grid-controls#1.x",
-    "oc-product-attribute-api": "git://github.com/oc-elements/oc-product-attribute-api#1.x",
+    "oc-attributes-api": "git://github.com/oc-elements/oc-attributes-api#1.x",
     "paper-icon-button": "PolymerElements/paper-icon-button#^1.1.2",
     "iron-collapse": "PolymerElements/iron-collapse#^1.0.0",
     "iron-flex-layout": "PolymerElements/iron-flex-layout#^1.0.0",
