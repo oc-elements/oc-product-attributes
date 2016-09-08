@@ -1,34 +1,272 @@
 <link rel="import" href="../polymer/polymer.html">
+<link rel="import" href="../iron-flex-layout/iron-flex-layout.html">
+<link rel="import" href="../iron-data-table/iron-data-table.html">
+<link rel="import" href="../iron-collapse/iron-collapse.html">
+<link rel="import" href="../iron-form/iron-form.html">
+<link rel="import" href="../paper-toggle-button/paper-toggle-button.html">
+<link rel="import" href="../paper-icon-button/paper-icon-button.html">
+<link rel="import" href="../paper-progress/paper-progress.html">
+<link rel="import" href="../paper-material/paper-material.html">
+<link rel="import" href="../paper-button/paper-button.html">
+<link rel="import" href="../paper-input/paper-input.html">
+<link rel="import" href="../oc-grid-controls/oc-grid-controls.html">
 
-<!--
-`oc-product-attributes`
-Element to manage product attributes on the Ordercloud platform
-
-@demo demo/index.html 
--->
+<link rel="import" href="../oc-iron-data-table-styles/oc-iron-data-table-styles.html">
+<link rel="import" href="../oc-core-utils/oc-api-consumer-behaviour.html">
+<link rel="import" href="../oc-product-attribute-api/oc-product-attribute-api.html">
 
 <dom-module id="oc-product-attributes">
+
+  <style include="oc-app-styles oc-iron-data-table-styles">
+    :host {
+      display: block;
+    }
+    iron-data-table[empty] {
+      height: 74px;
+    }
+    paper-material {
+      background-color: #fff;
+      padding: 1em;
+    }
+    paper-fab {
+      --paper-fab-background: #f05050;
+      --paper-fab-keyboard-focus-background: #ff0000;
+      position: fixed;
+      bottom: 1em;
+      right: 1em;
+    }
+    #attributeFormContainer paper-material {
+      padding: 1em;
+    }
+    #attributeFormContainer paper-toggle-button {
+      margin: 1em 0;
+    }
+    #saveBtn:not([disabled]) {
+      background-color: var(--default-primary-color);
+      color: var(--text-primary-color);
+      --paper-icon-button-ink-color: var(--text-primary-color);
+    }
+    #attributeFormContainer paper-icon-button {
+      margin-top: 1em;
+    }
+  </style>
+
   <template>
-    <style>
-      :host {
-        display: block;
-      }
-    </style>
-    <h2>Hello [[prop1]]</h2>
+
+    <paper-progress indeterminate hidden$="[[ !loading ]]"></paper-progress>
+    <iron-collapse id="attributeListContainer" opened$="[[ !attributeFormContainerOpen ]]">
+      <paper-material>
+        <paper-button on-tap="_whenCreateBtnClicked" raised>Create Attribute</paper-button>
+        <oc-grid-controls data="[[ attributes ]]" total-count="[[ _totalItems ]]" num-entries="[[ _pageSize ]]">
+          <iron-data-table empty$="[[ _isEmpty(attributes) ]]">
+            <data-table-column name="Name" sort-by="name" filter-by="name">
+              <template>[[ item.name ]]</template>
+            </data-table-column>
+            <data-table-column name="Description" sort-by="description" filter-by="description">
+              <template>[[ item.description ]]</template>
+            </data-table-column>
+            <data-table-column name="Options" sort-by="options" filter-by="options">
+              <template>[[ item.options ]]</template>
+            </data-table-column>
+            <data-table-column name="Required" sort-by="required" filter-by="required">
+              <template>[[ item.required ]]</template>
+            </data-table-column>
+            <data-table-column name="Enabled" flex="0" width="50px">
+              <template>
+                <paper-toggle-button checked$="[[ item.enabled ]]" on-change="_toggleAttributeEnabled"></paper-toggle-button>
+              </template>
+            </data-table-column>
+            <data-table-column flex="0" width="80px">
+              <template>
+                <paper-icon-button icon="icons:create" on-tap="_whenEditAttributeBtnClicked"></paper-icon-button>
+                <paper-icon-button icon="icons:delete" on-tap="_whenDeleteAttributeBtnClicked"></paper-icon-button>
+              </template>
+            </data-table-column>
+          </iron-data-table>
+        </oc-grid-controls>
+      </paper-material>
+
+      <div hidden$="[[ loading ]]">
+        <p hidden$="[[ !_isEmpty(attributes) ]]" class="error-message">No attributes found, you can add some now</p>
+        <p hidden$="[[ !attributesLoadError ]]" class="error-message">
+          Failed to load attributes
+          <a href="javascript:void(0);" on-tap="refresh">Retry</a>
+        </p>
+      </div>
+
+    </iron-collapse>
+
+    <iron-collapse id="attributeFormContainer" opened="{{ attributeFormContainerOpen }}">
+      <paper-material>
+        <div class="card-content">
+          <p>
+            Attributes are unique by name.
+            Required attributes can't be removed from products.
+            Options define acceptable values for the attribute, if none are supplied then the attribute may accept any value.
+          </p>
+          <form is="iron-form" id="attributeForm">
+            <paper-input label="Name" value="{{ editingAttribute.name }}" required></paper-input>
+            <paper-input label="Description" value="{{ editingAttribute.description }}"></paper-input>
+            <paper-input label="Options (separate with comma)" value="{{ editingAttribute.options }}"></paper-input>
+            <paper-toggle-button checked="{{ editingAttribute.required }}">Required</paper-toggle-button>
+            <paper-icon-button icon="icons:save" id="saveBtn" on-tap="_saveAttribute"></paper-icon-button>
+            <paper-icon-button icon="icons:clear" on-tap="_closeAttributeForm"></paper-icon-button>
+          </form>
+        </div>
+      </paper-material>
+    </iron-collapse>
+
+    <oc-product-attribute-api id="attributesApi"></oc-product-attribute-api>
+
   </template>
 
   <script>
     Polymer({
-
       is: 'oc-product-attributes',
+      behaviors: [OC.Behaviours.ApiConsumer],
 
       properties: {
-        prop1: {
-          type: String,
-          value: 'oc-product-attributes',
+        organisationId: Number,
+        productType: String,
+        attributes: Array,
+        loading: {
+          type: Boolean,
+          notify: true
         },
+        _totalItems : Number,
+        _pageSize : Number
       },
+
+      observers: [
+        'refresh(productType, organisationId)'
+      ],
+
+      refresh: function() {
+        if (!(this.productType && this.organisationId)) {
+          return;
+        }
+
+        this.attributesLoadError = false;
+        this.loading = true;
+        this.$.attributesApi.getAttributes(this.productType, true)
+                .then(function(request){
+                  this.attributes = request.response.results;
+                  this._totalItems = request.response.count;
+                  this._pageSize = 10;
+                }.bind(this))
+                .catch(this.set.bind(this, 'attributesLoadError', true))
+                .finally(this.set.bind(this, 'loading', false));
+      },
+
+      _whenCreateBtnClicked: function() {
+        this.editingAttribute = {
+          name: '',
+          description: '',
+          required: false,
+          options: ''
+        };
+        this.$.attributeFormContainer.show();
+      },
+
+      _whenEditAttributeBtnClicked: function(event) {
+        this.editingAttribute = {
+          id: event.model.item.id,
+          name: event.model.item.name,
+          description: event.model.item.description,
+          required: event.model.item.required,
+          options: event.model.item.options.join(', '),
+        };
+        this.$.attributeFormContainer.show();
+      },
+
+      _whenDeleteAttributeBtnClicked: function(event) {
+        this.$.attributesApi.deleteAttribute(event.model.item.id, this.productType)
+                .then(this.refresh.bind(this))
+                .catch(this._toastError.bind(this, 'Error: :error'));
+      },
+
+      _closeAttributeForm: function() {
+        this.$.attributeFormContainer.hide();
+      },
+
+      _toggleSaveBtnLoading: function(loading) {
+        this.$.saveBtn.disabled = loading;
+      },
+
+      _saveAttribute: function() {
+        this._toggleSaveBtnLoading(true);
+
+        if (!this.$.attributeForm.validate()) {
+          this._toggleSaveBtnLoading(false);
+          return;
+        }
+
+        var attribute = {
+          name: this.editingAttribute.name,
+          description: this.editingAttribute.description,
+          required: this.editingAttribute.required,
+          options: this.editingAttribute.options,
+        };
+
+        if (attribute.options.trim().length > 0) {
+          attribute.options = attribute.options.split(',')
+                  .map(function(option) { return option.trim(); })
+                  .filter(function(option) { return option && option.length > 0; });
+        }
+        else {
+          attribute.options = [];
+        }
+
+        if ('id' in this.editingAttribute) {
+          attribute.id = this.editingAttribute.id;
+          this.$.attributesApi.updateAttribute(attribute, this.productType)
+                  .then(this._closeAttributeForm.bind(this))
+                  .then(this.refresh.bind(this))
+                  .catch(this._toastError.bind(this, 'Error: :error'))
+                  .finally(this._toggleSaveBtnLoading.bind(this, false));
+        }
+        else {
+          this.$.attributesApi.createAttribute(this.organisationId, attribute, this.productType)
+                  .then(this._closeAttributeForm.bind(this))
+                  .then(this.refresh.bind(this))
+                  .catch(this._toastError.bind(this, 'Error: :error'))
+                  .finally(this._toggleSaveBtnLoading.bind(this, false));
+        }
+      },
+
+      _toggleAttributeEnabled: function(event) {
+        var toggleBtn = event.target,
+                attribute = event.model.item;
+        this.$.attributesApi.toggleEnabled(attribute.id, toggleBtn.checked, this.productType)
+                .catch(this._when_AttributeStateUpdateFailed.bind(this, toggleBtn.checked, attribute, toggleBtn));
+      },
+      _when_AttributeStateUpdateFailed: function(enabled, attribute, toggleBtn, error) {
+        this._toastError(
+                'Failed to ' + (enabled ? 'enabled' : 'disabled') + ' "' + attribute.name + '" tag: :error',
+                error
+        );
+        toggleBtn.checked = attribute.enabled;
+      },
+
+      _isEmpty: function(data) {
+        return data && data.length === 0;
+      },
+
+      _toastError: function(message, error) {
+        if (error) {
+          message = message.replace(':error', error.message);
+        }
+        else {
+          message = 'Error: ' + message;
+        }
+        this.fire('toast', {text: message, duration: 6000});
+      },
+
+      _sortAttributeByName: function(a, b) {
+        return a.name > b.name;
+      }
 
     });
   </script>
+
 </dom-module>
